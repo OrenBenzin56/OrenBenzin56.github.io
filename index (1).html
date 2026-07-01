@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Где бензин? — народная карта АЗС Оренбурга</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap&subset=cyrillic,latin" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0e1418;--panel:#151d23;--panel2:#1b262d;--line:#28353d;
+    --ink:#e9eff1;--muted:#8a9aa3;--muted2:#6a7981;
+    --amber:#ffab2e;--green:#33c47d;--yellow:#ecc04b;--red:#e35d5d;--stale:#5b6a72;--unknown:#4a6b7a;
+    --sheet-h:58vh;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:'Inter',system-ui,sans-serif;overflow:hidden}
+  .mono{font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums}
+
+  header{position:absolute;top:0;left:0;right:0;z-index:1000;pointer-events:none}
+  .bar{margin:10px;background:linear-gradient(180deg,rgba(21,29,35,.96),rgba(21,29,35,.82));
+    border:1px solid var(--line);border-radius:14px;padding:10px 14px;backdrop-filter:blur(8px);
+    pointer-events:auto;box-shadow:0 8px 30px rgba(0,0,0,.45);max-width:360px}
+  .brandrow{display:flex;align-items:center;gap:11px}
+  .gauge{width:34px;height:34px;flex:0 0 34px;border-radius:9px;background:radial-gradient(circle at 30% 30%,#20303a,#0d1519);border:1px solid var(--line);position:relative}
+  .gauge::before{content:"";position:absolute;width:3px;height:12px;background:var(--amber);border-radius:2px;bottom:15px;left:50%;transform:translateX(-50%) rotate(38deg);transform-origin:bottom center;box-shadow:0 0 8px var(--amber)}
+  .gauge::after{content:"";position:absolute;bottom:6px;left:50%;transform:translateX(-50%);width:7px;height:7px;border-radius:50%;background:var(--amber);box-shadow:0 0 8px var(--amber)}
+  h1{font-family:'Oswald';font-weight:700;font-size:23px;letter-spacing:.5px;margin:0;line-height:1;text-transform:uppercase}
+  h1 span{color:var(--amber)}
+  .sub{font-size:11px;color:var(--muted);letter-spacing:.6px;text-transform:uppercase;margin-top:3px}
+  .live{display:inline-flex;align-items:center;gap:5px;color:var(--green)}
+  .live.local{color:var(--muted2)}
+  .live i{width:6px;height:6px;border-radius:50%;background:currentColor;box-shadow:0 0 7px currentColor;animation:pulse 1.8s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+
+  .counts{display:flex;gap:6px;margin-top:10px}
+  .cnt{flex:1;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:6px 8px;display:flex;flex-direction:column;gap:2px}
+  .cnt b{font-family:'JetBrains Mono';font-size:17px;line-height:1}
+  .cnt small{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px}
+  .cnt.g b{color:var(--green)}.cnt.y b{color:var(--yellow)}.cnt.r b{color:var(--red)}.cnt.s b{color:var(--stale)}
+
+  .filters{display:flex;gap:6px;margin-top:9px;flex-wrap:wrap}
+  .fchip{font-family:'Oswald';font-weight:600;font-size:12px;letter-spacing:.4px;padding:5px 11px;border-radius:20px;background:var(--panel2);border:1px solid var(--line);color:var(--muted);cursor:pointer;transition:.15s}
+  .fchip.on{background:var(--amber);color:#20160a;border-color:var(--amber)}
+
+  #map{position:absolute;inset:0;background:var(--bg)}
+  .leaflet-container{background:var(--bg)}
+  .leaflet-control-attribution{background:rgba(14,20,24,.7)!important;color:#5a6a72!important;font-size:9px!important}
+  .leaflet-control-attribution a{color:#7a8a92!important}
+  .leaflet-bar a{background:var(--panel)!important;color:var(--ink)!important;border-color:var(--line)!important}
+  #map.adding{cursor:crosshair}
+
+  .pin{width:26px;height:26px;transform:translate(-50%,-100%)}
+  .pin svg{filter:drop-shadow(0 3px 5px rgba(0,0,0,.55))}
+  .pin .dot{animation:blip 2.6s ease-in-out infinite}
+  @keyframes blip{0%,100%{opacity:1}50%{opacity:.55}}
+  .pin.sel svg{filter:drop-shadow(0 0 9px var(--amber)) drop-shadow(0 3px 5px rgba(0,0,0,.6))}
+
+  .fab{position:absolute;z-index:1100;right:14px;bottom:0;display:flex;flex-direction:column;gap:9px;transition:bottom .32s;pointer-events:auto}
+  .fab.up{bottom:calc(var(--sheet-h) + 14px)}
+  .fab button{width:48px;height:48px;border-radius:14px;border:1px solid var(--line);background:var(--panel);color:var(--ink);font-size:22px;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.4);display:grid;place-items:center}
+  .fab button.add{background:var(--amber);color:#20160a;border-color:var(--amber);font-weight:700}
+
+  #sheet{position:absolute;z-index:1200;left:0;right:0;bottom:0;height:var(--sheet-h);background:var(--panel);border-top:1px solid var(--line);border-radius:18px 18px 0 0;box-shadow:0 -12px 40px rgba(0,0,0,.5);transform:translateY(105%);transition:transform .32s cubic-bezier(.2,.8,.2,1);display:flex;flex-direction:column}
+  #sheet.open{transform:translateY(0)}
+  .grip{width:40px;height:4px;border-radius:3px;background:var(--line);margin:9px auto 4px}
+  .sheet-body{overflow-y:auto;padding:4px 16px 20px;-webkit-overflow-scrolling:touch}
+
+  .cardhead{display:flex;align-items:flex-start;gap:11px;padding-top:4px}
+  .brandtag{font-family:'Oswald';font-weight:600;font-size:10px;letter-spacing:1px;text-transform:uppercase;padding:3px 8px;border-radius:6px;background:var(--panel2);border:1px solid var(--line);color:var(--amber);white-space:nowrap;margin-top:2px}
+  .cardhead h2{font-family:'Oswald';font-weight:600;font-size:19px;margin:0;line-height:1.15;text-transform:uppercase}
+  .addr{font-size:12px;color:var(--muted);margin-top:3px}
+  .xbtn{margin-left:auto;background:var(--panel2);border:1px solid var(--line);color:var(--muted);width:30px;height:30px;border-radius:8px;font-size:16px;flex:0 0 30px;cursor:pointer}
+
+  .fresh{display:flex;align-items:center;gap:9px;margin:13px 0 3px}
+  .fbar{flex:1;height:6px;border-radius:4px;background:var(--panel2);overflow:hidden;border:1px solid var(--line)}
+  .fbar i{display:block;height:100%;border-radius:4px;transition:width .4s}
+  .ftxt{font-size:11px;letter-spacing:.3px;text-transform:uppercase}
+
+  .fuels{margin-top:12px;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .frow{display:flex;align-items:center;gap:10px;padding:11px 13px;border-bottom:1px solid var(--line)}
+  .frow:last-child{border-bottom:none}
+  .frow .fl{font-family:'Oswald';font-weight:600;font-size:15px;letter-spacing:.5px;width:64px}
+  .chip{font-size:11.5px;font-weight:600;padding:4px 10px;border-radius:20px;letter-spacing:.3px}
+  .chip.yes{background:rgba(51,196,125,.14);color:var(--green);border:1px solid rgba(51,196,125,.35)}
+  .chip.no{background:rgba(227,93,93,.14);color:var(--red);border:1px solid rgba(227,93,93,.35)}
+  .chip.unknown{background:rgba(74,107,122,.14);color:#9fb4bd;border:1px solid rgba(74,107,122,.4)}
+  .price{margin-left:auto;font-family:'JetBrains Mono';font-size:14px}
+  .price small{color:var(--muted);font-size:11px}
+
+  .meta{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+  .mtag{font-size:12px;padding:7px 11px;border-radius:9px;background:var(--panel2);border:1px solid var(--line);display:flex;align-items:center;gap:7px;color:var(--muted)}
+  .mtag b{color:var(--ink);font-weight:600}
+  .qdot{width:8px;height:8px;border-radius:50%}
+
+  .actions{display:flex;gap:9px;margin-top:16px}
+  .btn{flex:1;font-family:'Oswald';font-weight:600;font-size:14px;letter-spacing:.6px;text-transform:uppercase;padding:13px;border-radius:11px;border:1px solid var(--line);background:var(--panel2);color:var(--ink);cursor:pointer;transition:.15s;display:flex;align-items:center;justify-content:center;gap:7px}
+  .btn:hover{border-color:var(--muted2)}.btn:active{transform:scale(.98)}
+  .btn.primary{background:var(--amber);color:#20160a;border-color:var(--amber)}
+  .btn.primary:hover{background:#ffb845}
+  .confirms{text-align:center;font-size:11.5px;color:var(--muted);margin-top:10px}
+  .confirms b{color:var(--green)}
+  .report-link{display:block;text-align:center;margin-top:12px;font-size:11px;color:var(--muted2);text-decoration:underline;cursor:pointer;background:none;border:none;width:100%}
+
+  .form h3{font-family:'Oswald';text-transform:uppercase;letter-spacing:.6px;font-size:15px;margin:6px 0 4px}
+  .formnote{font-size:11px;color:var(--muted2);margin-bottom:12px;line-height:1.5}
+  .frow-edit{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}
+  .frow-edit .fl{width:60px;font-family:'Oswald';font-weight:600;font-size:15px}
+  .seg{display:flex;margin-left:auto;border:1px solid var(--line);border-radius:9px;overflow:hidden}
+  .seg button{background:var(--panel2);border:none;color:var(--muted);font-size:12px;font-weight:600;padding:7px 12px;cursor:pointer;border-left:1px solid var(--line)}
+  .seg button:first-child{border-left:none}
+  .seg button.on.y{background:var(--green);color:#08210f}
+  .seg button.on.n{background:var(--red);color:#2a0d0d}
+  .seg button.on.u{background:var(--unknown);color:#eaf3f7}
+  .field{margin-top:13px}
+  .field label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:6px}
+  .field select,.field input,.field textarea{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--ink);padding:11px;border-radius:10px;font-size:14px;font-family:inherit}
+  .field textarea{resize:vertical;min-height:52px}
+  .field.two{display:flex;gap:9px}.field.two>div{flex:1}
+
+  .toast{position:absolute;bottom:calc(var(--sheet-h) + 14px);left:50%;transform:translateX(-50%) translateY(20px);background:#0a1013;border:1px solid var(--line);color:var(--ink);padding:11px 16px;border-radius:11px;font-size:13px;z-index:2000;opacity:0;transition:.3s;pointer-events:none;box-shadow:0 8px 30px rgba(0,0,0,.5);max-width:90vw;text-align:center}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+  footer{position:absolute;bottom:0;left:0;right:0;z-index:900;pointer-events:none;text-align:center;padding:6px}
+  .disc{display:inline-block;pointer-events:auto;background:rgba(14,20,24,.85);border:1px solid var(--line);color:var(--muted2);font-size:10px;padding:5px 12px;border-radius:20px;backdrop-filter:blur(4px);max-width:92vw}
+
+  @media (min-width:720px){
+    :root{--sheet-h:auto}
+    #sheet{left:auto;right:14px;bottom:14px;top:auto;width:390px;max-height:80vh;height:auto;border-radius:16px;border:1px solid var(--line);transform:translateX(120%)}
+    #sheet.open{transform:translateX(0)}
+    .grip{display:none}
+    .fab{bottom:14px}.fab.up{bottom:14px}
+    .toast{bottom:24px;left:24px;transform:translateX(0) translateY(20px)}
+    .toast.show{transform:translateX(0) translateY(0)}
+  }
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+  :focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<header>
+  <div class="bar">
+    <div class="brandrow">
+      <div class="gauge" aria-hidden="true"></div>
+      <div>
+        <h1>Где <span>бензин?</span></h1>
+        <div class="sub"><span class="live" id="liveDot"><i></i><span id="liveTxt">live</span></span> · Оренбург · народная карта</div>
+      </div>
+    </div>
+    <div class="counts">
+      <div class="cnt g"><b id="c-g">0</b><small>есть</small></div>
+      <div class="cnt y"><b id="c-y">0</b><small>частично</small></div>
+      <div class="cnt r"><b id="c-r">0</b><small>нет</small></div>
+      <div class="cnt s"><b id="c-s">0</b><small>без данных</small></div>
+    </div>
+    <div class="filters" id="filters"></div>
+  </div>
+</header>
+
+<div class="fab" id="fab">
+  <button class="add" id="addBtn" title="Добавить АЗС" aria-label="Добавить АЗС">＋</button>
+  <button id="locBtn" title="Моё местоположение" aria-label="Моё местоположение">◎</button>
+</div>
+
+<div id="sheet" role="dialog" aria-modal="false" aria-label="Карточка АЗС">
+  <div class="grip" id="grip"></div>
+  <div class="sheet-body" id="sheetBody"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<footer>
+  <div class="disc">Данные добавляют пользователи. Не является официальным источником о наличии топлива.</div>
+</footer>
+
+<!-- Leaflet -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<!-- Supabase JS (глобальная переменная window.supabase). Можно заменить CDN на unpkg, если jsdelivr недоступен. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+/* =================================================================
+   «ГДЕ БЕНЗИН?» — народная карта АЗС.  Один файл, без сборки.
+
+   ┌──────────────────────────────────────────────────────────────┐
+   │  ШАГ 1. Создай проект на supabase.com (Free).                 │
+   │  ШАГ 2. Открой SQL Editor и выполни:                          │
+   │                                                              │
+   │   create table if not exists public.stations (               │
+   │     id text primary key, brand text, name text,              │
+   │     lat double precision, lng double precision,              │
+   │     f jsonb default '{}'::jsonb, q text default 'none',      │
+   │     p jsonb default '{}'::jsonb, note text default '',       │
+   │     updated_at timestamptz, confirms int default 0);         │
+   │   alter table public.stations enable row level security;     │
+   │   create policy "read"   on public.stations for select using (true); │
+   │   create policy "insert" on public.stations for insert with check (true); │
+   │   create policy "update" on public.stations for update using (true) with check (true); │
+   │   alter publication supabase_realtime add table public.stations; │
+   │                                                              │
+   │  ШАГ 3. Settings → API → скопируй Project URL и anon-key,     │
+   │         вставь их в две строки ниже. Готово.                  │
+   │  (anon-ключ публичный — держать его в коде безопасно,         │
+   │   доступ ограничивают RLS-политики выше.)                    │
+   └──────────────────────────────────────────────────────────────┘
+   Пока ключи не вставлены — сайт работает на localStorage (данные
+   только на этом устройстве). С ключами — общие данные для всех +
+   real-time: чужие отметки появляются на карте сразу.
+   ================================================================= */
+
+const SB_URL = 'ВСТАВЬ_СЮДА_PROJECT_URL';   // напр. https://abcde12345.supabase.co
+const SB_KEY = 'ВСТАВЬ_СЮДА_ANON_KEY';      // длинный ключ вида eyJhbGciOi...
+
+const SB_OK = (typeof window.supabase !== 'undefined')
+  && /^https:\/\/.+\.supabase\.co/.test(SB_URL) && SB_KEY.length > 20;
+const sb = SB_OK ? window.supabase.createClient(SB_URL, SB_KEY) : null;
+
+const FUELS=[{k:'92',label:'АИ-92'},{k:'95',label:'АИ-95'},{k:'98',label:'АИ-98'},{k:'dt',label:'ДТ'},{k:'gas',label:'Газ'}];
+const QUEUE={none:{t:'нет очереди',c:'var(--green)'},small:{t:'5–10 машин',c:'var(--yellow)'},big:{t:'большая',c:'var(--red)'}};
+const STALE_MIN=180, KEY='gde-benzin-stations';
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+/* ---- демо-данные Оренбурга (координаты примерные, всё редактируется) ---- */
+function demo(){
+  const now=Date.now(), a=m=>now-m*60000;
+  return [
+    {id:'s1',brand:'Лукойл',name:'пр. Гагарина, 43',lat:51.7899,lng:55.1268,f:{'92':'yes','95':'yes','98':'no','dt':'yes','gas':'unknown'},q:'small',p:{'92':'59,90','95':'64,30'},note:'',updatedAt:a(8),confirms:4},
+    {id:'s2',brand:'Газпромнефть',name:'ул. Терешковой, 144',lat:51.7625,lng:55.1520,f:{'92':'no','95':'no','98':'no','dt':'yes','gas':'yes'},q:'big',p:{},note:'ДТ до 20 л',updatedAt:a(19),confirms:6},
+    {id:'s3',brand:'Роснефть',name:'ул. Чкалова, 25',lat:51.8360,lng:55.1900,f:{'92':'yes','95':'no','98':'unknown','dt':'yes','gas':'unknown'},q:'small',p:{'92':'60,10'},note:'',updatedAt:a(34),confirms:2},
+    {id:'s4',brand:'Татнефть',name:'пр. Дзержинского, 2',lat:51.8120,lng:55.1650,f:{'92':'yes','95':'yes','98':'yes','dt':'yes','gas':'unknown'},q:'none',p:{'92':'59,50','95':'63,90'},note:'',updatedAt:a(5),confirms:3},
+    {id:'s5',brand:'ННК',name:'ул. Волгоградская, 6',lat:51.7710,lng:55.0820,f:{'92':'no','95':'no','98':'no','dt':'no','gas':'unknown'},q:'none',p:{},note:'бензина нет',updatedAt:a(52),confirms:5},
+    {id:'s6',brand:'Лукойл',name:'Загородное шоссе, 18',lat:51.8000,lng:55.0600,f:{'92':'yes','95':'unknown','98':'unknown','dt':'yes','gas':'yes'},q:'small',p:{'92':'59,90'},note:'в канистры нельзя',updatedAt:a(71),confirms:3},
+    {id:'s7',brand:'Газпромнефть',name:'ул. Беляевская, 50',lat:51.7480,lng:55.1950,f:{'92':'no','95':'yes','98':'no','dt':'unknown','gas':'unknown'},q:'big',p:{'95':'64,30'},note:'только по карте',updatedAt:a(12),confirms:4},
+    {id:'s8',brand:'Роснефть',name:'ул. Монтажников, 30',lat:51.8210,lng:55.1350,f:{'92':'unknown','95':'unknown','98':'unknown','dt':'unknown','gas':'unknown'},q:'none',p:{},note:'',updatedAt:null,confirms:0},
+    {id:'s9',brand:'АГЗС',name:'ул. Промышленная, 11',lat:51.7550,lng:55.0700,f:{'92':'no','95':'no','98':'no','dt':'no','gas':'yes'},q:'small',p:{},note:'только газ',updatedAt:a(27),confirms:2},
+    {id:'s10',brand:'Лукойл',name:'ул. Пролетарская, 92',lat:51.7680,lng:55.1080,f:{'92':'yes','95':'yes','98':'no','dt':'yes','gas':'unknown'},q:'none',p:{'92':'59,90','95':'64,30'},note:'',updatedAt:a(3),confirms:5},
+  ];
+}
+
+/* ---- ХРАНИЛИЩЕ: Supabase (общее + real-time) → иначе localStorage ---- */
+const toRow=s=>({id:s.id,brand:s.brand,name:s.name,lat:s.lat,lng:s.lng,f:s.f,q:s.q,p:s.p,note:s.note,
+  updated_at:s.updatedAt?new Date(s.updatedAt).toISOString():null,confirms:s.confirms||0});
+const fromRow=r=>({id:r.id,brand:r.brand,name:r.name,lat:r.lat,lng:r.lng,f:r.f||{},q:r.q||'none',p:r.p||{},
+  note:r.note||'',updatedAt:r.updated_at?new Date(r.updated_at).getTime():null,confirms:r.confirms||0});
+
+const DB={
+  mode: SB_OK?'supabase':'local',
+  async loadAll(){
+    if(SB_OK){ const {data,error}=await sb.from('stations').select('*');
+      if(error){console.error('load',error);return null;} return data.map(fromRow); }
+    try{const raw=localStorage.getItem(KEY);return raw?JSON.parse(raw):null;}catch(e){return null;}
+  },
+  async saveOne(st){
+    if(SB_OK){ const {error}=await sb.from('stations').upsert(toRow(st)); if(error)console.error('saveOne',error); return; }
+    try{localStorage.setItem(KEY,JSON.stringify(stations));}catch(e){}
+  },
+  async saveAll(arr){
+    if(SB_OK){ const {error}=await sb.from('stations').upsert(arr.map(toRow)); if(error)console.error('saveAll',error); return; }
+    try{localStorage.setItem(KEY,JSON.stringify(arr));}catch(e){}
+  },
+  subscribe(onChange){
+    if(!SB_OK) return;
+    sb.channel('stations-live')
+      .on('postgres_changes',{event:'*',schema:'public',table:'stations'},
+        p=>{ if(p.new&&p.new.id) onChange(fromRow(p.new)); })
+      .subscribe();
+  }
+};
+
+let stations=[], selected=null, filterFuel=null, addMode=false, draft=null;
+const markers={};
+
+/* ---- логика статусов ---- */
+const ageMin=st=>st.updatedAt?Math.max(0,Math.round((Date.now()-st.updatedAt)/60000)):Infinity;
+const isStale=st=>ageMin(st)>STALE_MIN;
+function statusColor(st){
+  if(!st.updatedAt) return {key:'s',color:'var(--unknown)'};
+  if(isStale(st)) return {key:'s',color:'var(--stale)'};
+  const core=['92','95','dt'].map(k=>st.f[k]);
+  const yes=core.filter(v=>v==='yes').length, no=core.filter(v=>v==='no').length;
+  if(yes>0&&no===0) return {key:'g',color:'var(--green)'};
+  if(yes>0&&no>0)  return {key:'y',color:'var(--yellow)'};
+  if(no>0&&yes===0) return {key:'r',color:'var(--red)'};
+  return {key:'s',color:'var(--unknown)'};
+}
+
+/* ---- карта ---- */
+const map=L.map('map',{zoomControl:true,attributionControl:true}).setView([51.788,55.115],12);
+map.attributionControl.setPrefix(''); // убираем подпись Leaflet с флагом 🇺🇦, оставляем только копирайт карты
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+  {maxZoom:19,subdomains:'abcd',attribution:'&copy; OpenStreetMap &copy; CARTO'}).addTo(map);
+
+function pinIcon(color,sel){
+  return L.divIcon({className:'',iconSize:[26,26],
+    html:`<div class="pin ${sel?'sel':''}"><svg width="26" height="34" viewBox="0 0 26 34">
+      <path d="M13 0C5.8 0 0 5.6 0 12.6 0 22 13 34 13 34s13-12 13-21.4C26 5.6 20.2 0 13 0z" fill="${color}"/>
+      <circle class="dot" cx="13" cy="12.6" r="5" fill="#0e1418"/>
+      <circle class="dot" cx="13" cy="12.6" r="2.4" fill="${color}"/></svg></div>`});
+}
+const visible=st=>!filterFuel||st.f[filterFuel]==='yes';
+
+function renderMarkers(){
+  Object.values(markers).forEach(m=>map.removeLayer(m));
+  for(const k in markers) delete markers[k];
+  for(const st of stations){
+    if(!visible(st)) continue;
+    const sc=statusColor(st);
+    const m=L.marker([st.lat,st.lng],{icon:pinIcon(sc.color,selected===st.id)}).addTo(map);
+    m.on('click',()=>selectStation(st.id));
+    markers[st.id]=m;
+  }
+  updateCounts();
+}
+const cg=document.getElementById('c-g'),cy=document.getElementById('c-y'),cr=document.getElementById('c-r'),cs=document.getElementById('c-s');
+function updateCounts(){
+  const t={g:0,y:0,r:0,s:0}; for(const st of stations) t[statusColor(st).key]++;
+  cg.textContent=t.g; cy.textContent=t.y; cr.textContent=t.r; cs.textContent=t.s;
+}
+
+/* ---- фильтры по топливу ---- */
+const filtersEl=document.getElementById('filters');
+FUELS.forEach(f=>{
+  const b=document.createElement('button'); b.className='fchip'; b.textContent=f.label;
+  b.onclick=()=>{ filterFuel=filterFuel===f.k?null:f.k;
+    [...filtersEl.children].forEach(c=>c.classList.remove('on'));
+    if(filterFuel) b.classList.add('on'); renderMarkers(); };
+  filtersEl.appendChild(b);
+});
+
+/* ---- карточка ---- */
+const sheet=document.getElementById('sheet'), body=document.getElementById('sheetBody'), fab=document.getElementById('fab');
+function freshBits(st){
+  if(!st.updatedAt) return {pct:6,col:'var(--unknown)',txt:'данных пока нет'};
+  const a=ageMin(st);
+  if(a>=STALE_MIN) return {pct:6,col:'var(--stale)',txt:'данные устарели'};
+  const pct=Math.max(6,100-Math.round(a/STALE_MIN*100));
+  const col=a<60?'var(--green)':(a<STALE_MIN*0.66?'var(--yellow)':'var(--red)');
+  return {pct,col,txt:a<1?'только что':`обновлено ${a} мин назад`};
+}
+const chip=v=>`<span class="chip ${v}">${({yes:'есть',no:'нет',unknown:'?'})[v]}</span>`;
+
+function selectStation(id){
+  draft=null; selected=id; const st=stations.find(x=>x.id===id); if(!st) return;
+  renderMarkers(); map.panTo([st.lat,st.lng],{animate:true});
+  const fb=freshBits(st);
+  const rows=FUELS.map(f=>{
+    const pr=st.p&&st.p[f.k]?`<span class="price">${esc(st.p[f.k])}<small> ₽</small></span>`:'';
+    return `<div class="frow"><span class="fl">${f.label}</span>${chip(st.f[f.k]||'unknown')}${pr}</div>`;}).join('');
+  const q=QUEUE[st.q]||QUEUE.none;
+  body.innerHTML=`
+    <div class="cardhead">
+      <span class="brandtag">${esc(st.brand)}</span>
+      <div><h2>${esc(st.name.split(',')[0])}</h2><div class="addr">${esc(st.name)}</div></div>
+      <button class="xbtn" onclick="closeSheet()" aria-label="Закрыть">✕</button>
+    </div>
+    <div class="fresh"><span class="ftxt" style="color:${fb.col}">${fb.txt}</span>
+      <div class="fbar"><i style="width:${fb.pct}%;background:${fb.col}"></i></div></div>
+    <div class="fuels">${rows}</div>
+    <div class="meta">
+      <span class="mtag"><span class="qdot" style="background:${q.c}"></span>Очередь: <b>${q.t}</b></span>
+      ${st.note?`<span class="mtag">⚠️ <b>${esc(st.note)}</b></span>`:''}
+    </div>
+    <div class="actions">
+      <button class="btn primary" onclick="confirmStation()">✓ Всё верно</button>
+      <button class="btn" onclick="openForm()">Сообщить</button>
+    </div>
+    <div class="confirms">подтвердили: <b>${st.confirms||0}</b> чел.</div>
+    <button class="report-link" onclick="reportBad()">Пожаловаться на неверные данные</button>`;
+  openSheet();
+}
+async function confirmStation(){
+  const st=stations.find(x=>x.id===selected); if(!st) return;
+  st.updatedAt=Date.now(); st.confirms=(st.confirms||0)+1;
+  await DB.saveOne(st); selectStation(selected); toast('Спасибо! Отметка обновлена');
+}
+
+/* ---- форма отчёта ---- */
+function openForm(){
+  const st=stations.find(x=>x.id===selected);
+  draft={f:{...st.f},q:st.q,p:{...(st.p||{})},note:st.note||''};
+  const rows=FUELS.map(f=>`
+    <div class="frow-edit"><span class="fl">${f.label}</span>
+      <div class="seg" data-k="${f.k}">
+        <button class="y ${draft.f[f.k]==='yes'?'on':''}" onclick="setF('${f.k}','yes')">Есть</button>
+        <button class="n ${draft.f[f.k]==='no'?'on':''}" onclick="setF('${f.k}','no')">Нет</button>
+        <button class="u ${draft.f[f.k]==='unknown'?'on':''}" onclick="setF('${f.k}','unknown')">?</button>
+      </div></div>`).join('');
+  body.innerHTML=`
+    <div class="cardhead" style="margin-bottom:6px">
+      <div><h2>Сообщить</h2><div class="addr">${esc(st.brand)} · ${esc(st.name)}</div></div>
+      <button class="xbtn" onclick="selectStation(selected)" aria-label="Назад">✕</button>
+    </div>
+    <div class="form">
+      <div class="formnote">Отметка станет видна всем на карте. Пиши только то, что видишь сам.</div>
+      <h3>Топливо</h3>${rows}
+      <div class="field"><label>Очередь</label>
+        <select id="q"><option value="none"${draft.q==='none'?' selected':''}>Нет очереди</option>
+        <option value="small"${draft.q==='small'?' selected':''}>5–10 машин</option>
+        <option value="big"${draft.q==='big'?' selected':''}>Большая</option></select></div>
+      <div class="field two">
+        <div><label>Цена АИ-92</label><input id="p92" inputmode="decimal" placeholder="₽" value="${esc(draft.p['92']||'')}"></div>
+        <div><label>Цена АИ-95</label><input id="p95" inputmode="decimal" placeholder="₽" value="${esc(draft.p['95']||'')}"></div>
+      </div>
+      <div class="field"><label>Комментарий / лимит</label>
+        <textarea id="note" placeholder="напр. до 20 л, только по карте, в канистры нельзя">${esc(draft.note||'')}</textarea></div>
+      <div class="actions">
+        <button class="btn primary" onclick="submitReport()">Опубликовать</button>
+        <button class="btn" onclick="selectStation(selected)">Отмена</button>
+      </div>
+    </div>`;
+}
+function setF(k,v){
+  draft.f[k]=v; const seg=body.querySelector(`.seg[data-k="${k}"]`);
+  seg.querySelectorAll('button').forEach(b=>b.classList.remove('on'));
+  seg.querySelector({yes:'.y',no:'.n',unknown:'.u'}[v]).classList.add('on');
+}
+async function submitReport(){
+  const st=stations.find(x=>x.id===selected);
+  st.f={...draft.f};
+  st.q=document.getElementById('q').value;
+  st.p={'92':document.getElementById('p92').value.trim(),'95':document.getElementById('p95').value.trim()};
+  st.note=document.getElementById('note').value.trim();
+  st.updatedAt=Date.now(); st.confirms=1;
+  await DB.saveOne(st); selectStation(selected); toast('Опубликовано. Спасибо, разведчик!');
+}
+function reportBad(){ toast('Жалоба отправлена на проверку'); }
+
+/* ---- добавление своей АЗС ---- */
+const addBtn=document.getElementById('addBtn');
+addBtn.onclick=()=>{ addMode=!addMode;
+  document.getElementById('map').classList.toggle('adding',addMode);
+  toast(addMode?'Нажми на карту, где стоит АЗС':'Добавление отменено'); };
+map.on('click',e=>{ if(!addMode) return;
+  addMode=false; document.getElementById('map').classList.remove('adding');
+  openAddForm(e.latlng.lat,e.latlng.lng); });
+function openAddForm(lat,lng){
+  selected=null;
+  body.innerHTML=`
+    <div class="cardhead" style="margin-bottom:6px">
+      <div><h2>Новая АЗС</h2><div class="addr mono">${lat.toFixed(4)}, ${lng.toFixed(4)}</div></div>
+      <button class="xbtn" onclick="closeSheet()" aria-label="Закрыть">✕</button>
+    </div>
+    <div class="form">
+      <div class="field"><label>Сеть / бренд</label><input id="nb" placeholder="Лукойл, Роснефть, Газпромнефть…"></div>
+      <div class="field"><label>Адрес / название</label><input id="nn" placeholder="ул. Чкалова, 25"></div>
+      <div class="actions">
+        <button class="btn primary" onclick="createStation(${lat},${lng})">Добавить</button>
+        <button class="btn" onclick="closeSheet()">Отмена</button>
+      </div>
+    </div>`;
+  openSheet();
+}
+async function createStation(lat,lng){
+  const brand=document.getElementById('nb').value.trim()||'АЗС';
+  const name=document.getElementById('nn').value.trim()||'без адреса';
+  const st={id:'u'+Date.now(),brand,name,lat,lng,
+    f:{'92':'unknown','95':'unknown','98':'unknown','dt':'unknown','gas':'unknown'},
+    q:'none',p:{},note:'',updatedAt:null,confirms:0};
+  stations.push(st); await DB.saveOne(st); renderMarkers(); selectStation(st.id);
+  toast('АЗС добавлена. Отметь наличие топлива!');
+}
+
+/* ---- моё местоположение ---- */
+document.getElementById('locBtn').onclick=()=>{
+  if(!navigator.geolocation){ toast('Геолокация недоступна'); return; }
+  navigator.geolocation.getCurrentPosition(
+    p=>map.setView([p.coords.latitude,p.coords.longitude],14),
+    ()=>toast('Не удалось определить местоположение'));
+};
+
+/* ---- сброс к демо (двойной тап по счётчику «без данных») ---- */
+cs.parentElement.ondblclick=async()=>{ if(confirm('Сбросить карту к демо-данным?')){
+  stations=demo(); await DB.saveAll(stations); renderMarkers(); closeSheet(); toast('Карта сброшена к демо'); }};
+
+/* ---- sheet ---- */
+function openSheet(){ sheet.classList.add('open'); fab.classList.add('up'); }
+function closeSheet(){ sheet.classList.remove('open'); fab.classList.remove('up'); selected=null; draft=null; renderMarkers(); }
+document.getElementById('grip').addEventListener('click',closeSheet);
+
+let toastT; function toast(m){ const t=document.getElementById('toast'); t.textContent=m; t.classList.add('show');
+  clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),2600); }
+
+/* ---- индикатор режима ---- */
+function setModeBadge(){
+  const dot=document.getElementById('liveDot'), txt=document.getElementById('liveTxt');
+  if(DB.mode==='supabase'){ txt.textContent='live'; dot.classList.remove('local'); }
+  else{ txt.textContent='локально'; dot.classList.add('local'); }
+}
+
+/* ---- старт ---- */
+(async function(){
+  setModeBadge();
+  stations = await DB.loadAll();
+  if(!stations || !stations.length){ stations=demo(); await DB.saveAll(stations); } // засев демо, если пусто
+  renderMarkers();
+  setInterval(updateCounts,60000); // свежие отметки со временем «протухают»
+
+  // real-time: чужие изменения прилетают на карту сразу
+  DB.subscribe(remote=>{
+    const i=stations.findIndex(s=>s.id===remote.id);
+    if(i>=0) stations[i]=remote; else stations.push(remote);
+    renderMarkers();
+    if(selected===remote.id && !draft) selectStation(remote.id); // обновим открытую карточку, если её не редактируют
+  });
+
+  if(DB.mode==='local'){
+    setTimeout(()=>toast('Локальный режим. Вставь ключи Supabase в коде — данные станут общими'),1200);
+  }
+})();
+</script>
+</body>
+</html>
