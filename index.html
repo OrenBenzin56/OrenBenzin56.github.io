@@ -219,23 +219,63 @@ const sb = SB_OK ? window.supabase.createClient(SB_URL, SB_KEY) : null;
 
 const FUELS=[{k:'92',label:'АИ-92'},{k:'95',label:'АИ-95'},{k:'98',label:'АИ-98'},{k:'dt',label:'ДТ'},{k:'gas',label:'Газ'}];
 const QUEUE={none:{t:'нет очереди',c:'var(--green)'},small:{t:'5–10 машин',c:'var(--yellow)'},big:{t:'большая',c:'var(--red)'}};
-const STALE_MIN=180, KEY='gde-benzin-stations';
+const STALE_MIN=180, KEY='gde-benzin-stations-v2';
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 /* ---- демо-данные Оренбурга (координаты примерные, всё редактируется) ---- */
 function demo(){
-  const now=Date.now(), a=m=>now-m*60000;
+  // 48 реальных АЗС Оренбурга. approx:true = координата примерная (проверь кнопкой «поправить место»).
+  const U=()=>({'92':'unknown','95':'unknown','98':'unknown','dt':'unknown','gas':'unknown'});
+  const S=(id,brand,name,lat,lng,approx=true)=>({id,brand,name,lat,lng,f:U(),q:'none',p:{},note:'',updatedAt:null,confirms:0,approx});
   return [
-    {id:'s1',brand:'Лукойл',name:'пр. Гагарина, 43',lat:51.7899,lng:55.1268,f:{'92':'yes','95':'yes','98':'no','dt':'yes','gas':'unknown'},q:'small',p:{'92':'59,90','95':'64,30'},note:'',updatedAt:a(8),confirms:4},
-    {id:'s2',brand:'Газпромнефть',name:'ул. Терешковой, 144',lat:51.7625,lng:55.1520,f:{'92':'no','95':'no','98':'no','dt':'yes','gas':'yes'},q:'big',p:{},note:'ДТ до 20 л',updatedAt:a(19),confirms:6},
-    {id:'s3',brand:'Роснефть',name:'ул. Чкалова, 25',lat:51.8360,lng:55.1900,f:{'92':'yes','95':'no','98':'unknown','dt':'yes','gas':'unknown'},q:'small',p:{'92':'60,10'},note:'',updatedAt:a(34),confirms:2},
-    {id:'s4',brand:'Татнефть',name:'пр. Дзержинского, 2',lat:51.8120,lng:55.1650,f:{'92':'yes','95':'yes','98':'yes','dt':'yes','gas':'unknown'},q:'none',p:{'92':'59,50','95':'63,90'},note:'',updatedAt:a(5),confirms:3},
-    {id:'s5',brand:'ННК',name:'ул. Волгоградская, 6',lat:51.7710,lng:55.0820,f:{'92':'no','95':'no','98':'no','dt':'no','gas':'unknown'},q:'none',p:{},note:'бензина нет',updatedAt:a(52),confirms:5},
-    {id:'s6',brand:'Лукойл',name:'Загородное шоссе, 18',lat:51.8000,lng:55.0600,f:{'92':'yes','95':'unknown','98':'unknown','dt':'yes','gas':'yes'},q:'small',p:{'92':'59,90'},note:'в канистры нельзя',updatedAt:a(71),confirms:3},
-    {id:'s7',brand:'Газпромнефть',name:'ул. Беляевская, 50',lat:51.7480,lng:55.1950,f:{'92':'no','95':'yes','98':'no','dt':'unknown','gas':'unknown'},q:'big',p:{'95':'64,30'},note:'только по карте',updatedAt:a(12),confirms:4},
-    {id:'s8',brand:'Роснефть',name:'ул. Монтажников, 30',lat:51.8210,lng:55.1350,f:{'92':'unknown','95':'unknown','98':'unknown','dt':'unknown','gas':'unknown'},q:'none',p:{},note:'',updatedAt:null,confirms:0},
-    {id:'s9',brand:'АГЗС',name:'ул. Промышленная, 11',lat:51.7550,lng:55.0700,f:{'92':'no','95':'no','98':'no','dt':'no','gas':'yes'},q:'small',p:{},note:'только газ',updatedAt:a(27),confirms:2},
-    {id:'s10',brand:'Лукойл',name:'ул. Пролетарская, 92',lat:51.7680,lng:55.1080,f:{'92':'yes','95':'yes','98':'no','dt':'yes','gas':'unknown'},q:'none',p:{'92':'59,90','95':'64,30'},note:'',updatedAt:a(3),confirms:5},
+    S('s1','Башнефть','Беляевская ул., 131',51.720692,55.117968,false),
+    S('s2','Заправь Сам','Беляевская ул., 19/1',51.7225,55.1090),
+    S('s3','Газпром','Беляевская ул., 4/1',51.7235,55.1065),
+    S('s4','Башнефть','Донгузская ул., 5/3',51.7400,55.0880),
+    S('s5','Brent Fueller','Донгузская ул., 5А',51.7402,55.0888),
+    S('s6','Brent Fueller','Донгузская ул., 24',51.7440,55.0835),
+    S('s7','Brent Fueller','Невельская ул., 2/3',51.7420,55.0785),
+    S('s8','Заправь Сам','Оренбург (по координатам)',51.773136,55.074054,false),
+    S('s9','Башнефть','просп. Победы, 77',51.7670,55.0800),
+    S('s10','Ростанефть','Комсомольская ул., 197/1',51.7585,55.1080),
+    S('s11','Газпром','ул. Шевченко, 20/2',51.7620,55.0785),
+    S('s12','Ростанефть','ул. Шевченко, 4',51.7605,55.0825),
+    S('s13','Ростанефть','Полтавская ул., 76/1',51.7500,55.0950),
+    S('s14','Газпром','ул. Терешковой, 144/2',51.8150,55.1500),
+    S('s15','Brent Fueller','Пролетарская ул., 275/2',51.8000,55.1080),
+    S('s16','Exoil','Пролетарская ул., 285/2',51.8020,55.1085),
+    S('s17','Астра','ул. Лабужского, 1/1',51.8200,55.1400),
+    S('s18','Башнефть','ул. Терешковой, 136А',51.8150,55.1520),
+    S('s19','Русгаз Премиум','Северный округ (по координатам)',51.824131,55.099083,false),
+    S('s20','Лукойл','ул. Терешковой, 271/2',51.8220,55.1600),
+    S('s21','Русгаз Премиум','Северный округ (по координатам)',51.827784,55.107665,false),
+    S('s22','Заправь Сам','Оренбург (по координатам)',51.825652,55.114696,false),
+    S('s23','Башнефть','Шоссейная ул., 36',51.8150,55.1700),
+    S('s24','Лукойл','ул. Терешковой, 150/4',51.8160,55.1530),
+    S('s25','Оренойл','ул. Терешковой, 152/2',51.8160,55.1540),
+    S('s26','Газпром','Театральная ул., 1/1',51.8260,55.1350),
+    S('s27','Brent Fueller','Северный просп., 1/1',51.8280,55.1280),
+    S('s28','Башнефть','просп. Победы, 267',51.7750,55.0450),
+    S('s29','Башнефть','просп. Победы, 162, корп. 1',51.7720,55.0600),
+    S('s30','Ника-газ','Транспортная ул., 2/4',51.7780,55.0550),
+    S('s31','Газпром','просп. Победы, 147/1',51.7710,55.0630),
+    S('s32','Ростанефть','Транспортная ул., 2/1',51.7780,55.0560),
+    S('s33','Заправь Сам','ул. Диагностики, 2/2',51.8300,55.1200),
+    S('s34','Татнефть','Салмышская ул., 41/2',51.8300,55.1450),
+    S('s35','Ростанефть','Загородное ш., 38/2',51.8080,55.0550),
+    S('s36','РусГаз','Загородное ш., 27/7',51.8050,55.0600),
+    S('s37','Атлант','ул. Фронтовиков, 30',51.8120,55.0700),
+    S('s38','Лукойл','ул. Монтажников, 20/1',51.7880,55.1450),
+    S('s39','Ростанефть','ул. Монтажников, 10/1',51.7860,55.1400),
+    S('s40','Brent Fueller','Авторемонтная ул., 9А',51.7900,55.1500),
+    S('s41','Оренойл','Лесозащитная ул., 13',51.7400,55.1300),
+    S('s42','АЗС Берег','Южный округ (по координатам)',51.793343,55.166230,false),
+    S('s43','Газпром','Лесозащитная ул., 11',51.7400,55.1290),
+    S('s44','Brent Fueller','ул. Мира, 3/1',51.7550,55.1000),
+    S('s45','Башнефть','Промысловый пр., 11А',51.7950,55.1550),
+    S('s46','Brent Fueller','пр. Газовиков, 1Б',51.8350,55.1500),
+    S('s47','Лукойл','Загородное ш., 46',51.8100,55.0530),
+    S('s48','Лукойл','Беляевское ш., 3, с. Ивановка',51.7000,55.2300),
   ];
 }
 
@@ -269,7 +309,7 @@ const DB={
   }
 };
 
-let stations=[], selected=null, filterFuel=null, addMode=false, draft=null;
+let stations=[], selected=null, filterFuel=null, addMode=false, draft=null, moveMode=null;
 const markers={};
 
 /* ---- логика статусов ---- */
@@ -367,6 +407,8 @@ function selectStation(id){
       <button class="btn" onclick="openForm()">Сообщить</button>
     </div>
     <div class="confirms">подтвердили: <b>${st.confirms||0}</b> чел.</div>
+    ${st.approx?`<div class="confirms" style="color:var(--amber)">📍 место примерное — нажми «поправить место» и укажи точку на карте</div>`:''}
+    <button class="report-link" onclick="startMove()">✏ Поправить место на карте</button>
     <button class="report-link" onclick="reportBad()">Пожаловаться на неверные данные</button>`;
   openSheet();
 }
@@ -426,13 +468,22 @@ async function submitReport(){
   await DB.saveOne(st); selectStation(selected); toast('Опубликовано. Спасибо, разведчик!');
 }
 function reportBad(){ toast('Жалоба отправлена на проверку'); }
+function startMove(){ if(!selected) return; moveMode=selected;
+  sheet.classList.remove('open'); fab.classList.remove('up');
+  document.getElementById('map').classList.add('adding');
+  toast('Нажми на карту — куда перенести эту АЗС'); }
 
 /* ---- добавление своей АЗС ---- */
 const addBtn=document.getElementById('addBtn');
 addBtn.onclick=()=>{ addMode=!addMode;
   document.getElementById('map').classList.toggle('adding',addMode);
   toast(addMode?'Нажми на карту, где стоит АЗС':'Добавление отменено'); };
-map.on('click',e=>{ if(!addMode) return;
+map.on('click',e=>{
+  if(moveMode){ const st=stations.find(s=>s.id===moveMode); moveMode=null;
+    document.getElementById('map').classList.remove('adding');
+    if(st){ st.lat=e.latlng.lat; st.lng=e.latlng.lng; st.approx=false; DB.saveOne(st);
+      renderMarkers(); selectStation(st.id); toast('Место обновлено ✓'); } return; }
+  if(!addMode) return;
   addMode=false; document.getElementById('map').classList.remove('adding');
   openAddForm(e.latlng.lat,e.latlng.lng); });
 function openAddForm(lat,lng){
