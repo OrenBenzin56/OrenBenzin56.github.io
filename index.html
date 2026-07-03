@@ -55,6 +55,9 @@
   .pin .dot{animation:blip 2.6s ease-in-out infinite}
   @keyframes blip{0%,100%{opacity:1}50%{opacity:.55}}
   .pin.sel svg{filter:drop-shadow(0 0 9px var(--amber)) drop-shadow(0 3px 5px rgba(0,0,0,.6))}
+  .me{width:22px;height:22px;transform:translate(-50%,-50%);position:relative}
+  .me-core{position:absolute;left:50%;top:50%;width:14px;height:14px;transform:translate(-50%,-50%);border-radius:50%;background:#2f8fff;border:2px solid #fff;box-shadow:0 0 0 0 rgba(47,143,255,.5);animation:mepulse 2s infinite}
+  @keyframes mepulse{0%{box-shadow:0 0 0 0 rgba(47,143,255,.45)}70%{box-shadow:0 0 0 16px rgba(47,143,255,0)}100%{box-shadow:0 0 0 0 rgba(47,143,255,0)}}
 
   .fab{position:absolute;z-index:1100;right:14px;bottom:0;display:flex;flex-direction:column;gap:9px;transition:bottom .32s;pointer-events:auto}
   .fab.up{bottom:calc(var(--sheet-h) + 14px)}
@@ -193,7 +196,8 @@
    │     lat double precision, lng double precision,              │
    │     f jsonb default '{}'::jsonb, q text default 'none',      │
    │     p jsonb default '{}'::jsonb, note text default '',       │
-   │     updated_at timestamptz, confirms int default 0);         │
+   │     updated_at timestamptz, confirms int default 0,          │
+   │     flags int default 0);                                    │
    │   alter table public.stations enable row level security;     │
    │   create policy "read"   on public.stations for select using (true); │
    │   create policy "insert" on public.stations for insert with check (true); │
@@ -226,7 +230,7 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 function demo(){
   // 48 реальных АЗС Оренбурга с точными координатами (адреса и координаты пользователя).
   const U=()=>({'92':'unknown','95':'unknown','98':'unknown','dt':'unknown','gas':'unknown'});
-  const S=(id,brand,name,lat,lng,approx=false)=>({id,brand,name,lat,lng,f:U(),q:'none',p:{},note:'',updatedAt:null,confirms:0,approx});
+  const S=(id,brand,name,lat,lng,approx=false)=>({id,brand,name,lat,lng,f:U(),q:'none',p:{},note:'',updatedAt:null,confirms:0,flags:0,approx});
   return [
     S('s1','Заправь Сам','ул. Монтажников, 29/1',51.803890,55.161864),
     S('s2','Brent Fueller','ул. Мира, 3/3',51.782132,55.169563),
@@ -281,9 +285,9 @@ function demo(){
 
 /* ---- ХРАНИЛИЩЕ: Supabase (общее + real-time) → иначе localStorage ---- */
 const toRow=s=>({id:s.id,brand:s.brand,name:s.name,lat:s.lat,lng:s.lng,f:s.f,q:s.q,p:s.p,note:s.note,
-  updated_at:s.updatedAt?new Date(s.updatedAt).toISOString():null,confirms:s.confirms||0});
+  updated_at:s.updatedAt?new Date(s.updatedAt).toISOString():null,confirms:s.confirms||0,flags:s.flags||0});
 const fromRow=r=>({id:r.id,brand:r.brand,name:r.name,lat:r.lat,lng:r.lng,f:r.f||{},q:r.q||'none',p:r.p||{},
-  note:r.note||'',updatedAt:r.updated_at?new Date(r.updated_at).getTime():null,confirms:r.confirms||0});
+  note:r.note||'',updatedAt:r.updated_at?new Date(r.updated_at).getTime():null,confirms:r.confirms||0,flags:r.flags||0});
 
 const DB={
   mode: SB_OK?'supabase':'local',
@@ -315,9 +319,11 @@ const markers={};
 /* ---- логика статусов ---- */
 const ageMin=st=>st.updatedAt?Math.max(0,Math.round((Date.now()-st.updatedAt)/60000)):Infinity;
 const isStale=st=>ageMin(st)>STALE_MIN;
+const isDisputed=st=>(st.flags||0)>=2 && (st.flags||0)>=(st.confirms||0); // жалоб не меньше, чем подтверждений
 function statusColor(st){
   if(!st.updatedAt) return {key:'s',color:'var(--unknown)'};
   if(isStale(st)) return {key:'s',color:'var(--stale)'};
+  if(isDisputed(st)) return {key:'s',color:'var(--stale)'}; // данные оспорены — гасим
   const core=['92','95','dt'].map(k=>st.f[k]);
   const yes=core.filter(v=>v==='yes').length, no=core.filter(v=>v==='no').length;
   if(yes>0&&no===0) return {key:'g',color:'var(--green)'};
@@ -389,6 +395,12 @@ function selectStation(id){
     const pr=st.p&&st.p[f.k]?`<span class="price">${esc(st.p[f.k])}<small> ₽</small></span>`:'';
     return `<div class="frow"><span class="fl">${f.label}</span>${chip(st.f[f.k]||'unknown')}${pr}</div>`;}).join('');
   const q=QUEUE[st.q]||QUEUE.none;
+  let trust='';
+  if(st.updatedAt && !isStale(st)){
+    if(isDisputed(st)) trust=`<div class="confirms" style="color:var(--red)">⚑ данные оспорены — доверяй осторожно</div>`;
+    else if((st.confirms||0)>=3) trust=`<div class="confirms" style="color:var(--green)">🛡 надёжно подтверждено</div>`;
+    else if((st.confirms||0)<=1) trust=`<div class="confirms" style="color:var(--amber)">⚠ ещё не подтверждено другими</div>`;
+  }
   body.innerHTML=`
     <div class="cardhead">
       <span class="brandtag">${esc(st.brand)}</span>
@@ -406,7 +418,9 @@ function selectStation(id){
       <button class="btn primary" onclick="confirmStation()">✓ Всё верно</button>
       <button class="btn" onclick="openForm()">Сообщить</button>
     </div>
-    <div class="confirms">подтвердили: <b>${st.confirms||0}</b> чел.</div>
+    <button class="btn" style="width:100%;margin-top:9px" onclick="routeTo('${st.id}')">🧭 Проложить маршрут</button>
+    <div class="confirms">подтвердили: <b>${st.confirms||0}</b> чел.${(st.flags||0)?` · жалоб: <b style="color:var(--red)">${st.flags}</b>`:''}</div>
+    ${trust}
     ${st.approx?`<div class="confirms" style="color:var(--amber)">📍 место примерное — нажми «поправить место» и укажи точку на карте</div>`:''}
     <button class="report-link" onclick="startMove()">✏ Поправить место на карте</button>
     <button class="report-link" onclick="reportBad()">Пожаловаться на неверные данные</button>`;
@@ -467,7 +481,12 @@ async function submitReport(){
   st.updatedAt=Date.now(); st.confirms=1;
   await DB.saveOne(st); selectStation(selected); toast('Опубликовано. Спасибо, разведчик!');
 }
-function reportBad(){ toast('Жалоба отправлена на проверку'); }
+async function reportBad(){ const st=stations.find(x=>x.id===selected); if(!st) return;
+  st.flags=(st.flags||0)+1; await DB.saveOne(st); renderMarkers(); selectStation(selected);
+  toast('Жалоба учтена. Спасибо!'); }
+function routeTo(id){ const st=stations.find(x=>x.id===id); if(!st) return;
+  // маршрут от текущего местоположения (~) до заправки в Яндекс.Картах
+  window.open(`https://yandex.ru/maps/?rtext=~${st.lat}%2C${st.lng}&rtt=auto`,'_blank'); }
 function startMove(){ if(!selected) return; moveMode=selected;
   sheet.classList.remove('open'); fab.classList.remove('up');
   document.getElementById('map').classList.add('adding');
@@ -514,11 +533,16 @@ async function createStation(lat,lng){
 }
 
 /* ---- моё местоположение ---- */
+let meMarker=null;
 document.getElementById('locBtn').onclick=()=>{
   if(!navigator.geolocation){ toast('Геолокация недоступна'); return; }
-  navigator.geolocation.getCurrentPosition(
-    p=>map.setView([p.coords.latitude,p.coords.longitude],14),
-    ()=>toast('Не удалось определить местоположение'));
+  toast('Определяю местоположение…');
+  navigator.geolocation.getCurrentPosition(p=>{
+    const ll=[p.coords.latitude,p.coords.longitude];
+    const icon=L.divIcon({className:'',iconSize:[22,22],html:'<div class="me"><div class="me-core"></div></div>'});
+    if(meMarker) meMarker.setLatLng(ll); else meMarker=L.marker(ll,{icon,zIndexOffset:2000,interactive:false}).addTo(map);
+    map.setView(ll,15);
+  },()=>toast('Не удалось определить местоположение'),{enableHighAccuracy:true,timeout:8000});
 };
 
 /* ---- сброс к демо (двойной тап по счётчику «без данных») ---- */
