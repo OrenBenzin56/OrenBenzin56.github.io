@@ -120,6 +120,11 @@
   .field select,.field input,.field textarea{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--ink);padding:11px;border-radius:10px;font-size:14px;font-family:inherit}
   .field textarea{resize:vertical;min-height:52px}
   .field.two{display:flex;gap:9px}.field.two>div{flex:1}
+  .prices{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .pcell{display:flex;align-items:center;gap:7px;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:6px 9px}
+  .pcell span{font-family:'Oswald';font-weight:600;font-size:12px;color:var(--muted);white-space:nowrap;min-width:44px}
+  .pcell input{border:none;background:transparent;padding:4px 0;font-family:'JetBrains Mono';font-size:13px}
+  body.lightmap .leaflet-control-attribution{background:rgba(255,255,255,.7)!important;color:#555!important}
 
   .toast{position:absolute;bottom:calc(var(--sheet-h) + 14px);left:50%;transform:translateX(-50%) translateY(20px);background:#0a1013;border:1px solid var(--line);color:var(--ink);padding:11px 16px;border-radius:11px;font-size:13px;z-index:2000;opacity:0;transition:.3s;pointer-events:none;box-shadow:0 8px 30px rgba(0,0,0,.5);max-width:90vw;text-align:center}
   .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
@@ -166,6 +171,7 @@
 <div class="fab" id="fab">
   <button class="add" id="addBtn" title="Добавить АЗС" aria-label="Добавить АЗС">＋</button>
   <button id="locBtn" title="Моё местоположение" aria-label="Моё местоположение">◎</button>
+  <button id="themeBtn" title="Фон карты" aria-label="Сменить фон карты">◐</button>
 </div>
 
 <div id="sheet" role="dialog" aria-modal="false" aria-label="Карточка АЗС">
@@ -215,10 +221,11 @@
    ================================================================= */
 
 const SB_URL = 'https://rjcuhdtcqsebvwytxapv.supabase.co';   // напр. https://abcde12345.supabase.co
-const SB_KEY = 'https://rjcuhdtcqsebvwytxapv.supabase.co';      // длинный ключ вида eyJhbGciOi...
+const SB_KEY = 'sb_publishable_c4d2jGCLCtuzdhdmcFFMQA_iQsw8CB-';      // длинный ключ вида eyJhbGciOi...
 
 const SB_OK = (typeof window.supabase !== 'undefined')
-  && /^https:\/\/.+\.supabase\.co/.test(SB_URL) && SB_KEY.length > 20;
+  && /supabase\.co/.test(SB_URL)
+  && !!SB_KEY && SB_KEY.length > 10 && SB_KEY !== 'ВСТАВЬ_СЮДА_ANON_KEY';
 const sb = SB_OK ? window.supabase.createClient(SB_URL, SB_KEY) : null;
 
 const FUELS=[{k:'92',label:'АИ-92'},{k:'95',label:'АИ-95'},{k:'98',label:'АИ-98'},{k:'dt',label:'ДТ'},{k:'gas',label:'Газ'}];
@@ -304,6 +311,10 @@ const DB={
     if(SB_OK){ const {error}=await sb.from('stations').upsert(arr.map(toRow)); if(error)console.error('saveAll',error); return; }
     try{localStorage.setItem(KEY,JSON.stringify(arr));}catch(e){}
   },
+  async addReport(r){
+    if(SB_OK){ const {error}=await sb.from('reports').insert(r); if(error)console.error('addReport',error); return; }
+    try{const k='gde-benzin-reports';const a=JSON.parse(localStorage.getItem(k)||'[]');a.push({...r,created_at:new Date().toISOString()});localStorage.setItem(k,JSON.stringify(a));}catch(e){}
+  },
   subscribe(onChange){
     if(!SB_OK) return;
     sb.channel('stations-live')
@@ -335,8 +346,19 @@ function statusColor(st){
 /* ---- карта ---- */
 const map=L.map('map',{zoomControl:true,attributionControl:true}).setView([51.788,55.115],12);
 map.attributionControl.setPrefix(''); // убираем подпись Leaflet с флагом 🇺🇦, оставляем только копирайт карты
-L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-  {maxZoom:19,subdomains:'abcd',attribution:'&copy; OpenStreetMap &copy; CARTO'}).addTo(map);
+const TILES={
+  dark:L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{maxZoom:19,subdomains:'abcd',attribution:'&copy; OpenStreetMap &copy; CARTO'}),
+  light:L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{maxZoom:19,subdomains:'abcd',attribution:'&copy; OpenStreetMap &copy; CARTO'})
+};
+let mapTheme=(()=>{try{return localStorage.getItem('gde-benzin-theme')||'dark';}catch(e){return 'dark';}})();
+let curTiles=null;
+function applyTheme(t){
+  mapTheme=t; if(curTiles) map.removeLayer(curTiles);
+  curTiles=TILES[t]||TILES.dark; curTiles.addTo(map);
+  document.body.classList.toggle('lightmap',t==='light');
+  try{localStorage.setItem('gde-benzin-theme',t);}catch(e){}
+}
+applyTheme(mapTheme);
 
 function pinIcon(color,sel){
   return L.divIcon({className:'',iconSize:[26,26],
@@ -426,10 +448,23 @@ function selectStation(id){
     <button class="report-link" onclick="reportBad()">Пожаловаться на неверные данные</button>`;
   openSheet();
 }
+/* один голос с устройства на одну АЗС раз в 3 часа; сбрасывается, если данные изменились */
+const DEVICE_VOTES='gde-benzin-votes';
+const loadVotes=()=>{try{return JSON.parse(localStorage.getItem(DEVICE_VOTES))||{};}catch(e){return {};}};
+const saveVotes=v=>{try{localStorage.setItem(DEVICE_VOTES,JSON.stringify(v));}catch(e){}};
+const dataSig=st=>JSON.stringify([st.f,st.q,st.note]); // зависит только от данных, не от самих подтверждений
 async function confirmStation(){
   const st=stations.find(x=>x.id===selected); if(!st) return;
-  st.updatedAt=Date.now(); st.confirms=(st.confirms||0)+1;
-  await DB.saveOne(st); selectStation(selected); toast('Спасибо! Отметка обновлена');
+  const votes=loadVotes(), v=votes[st.id], now=Date.now(), sig=dataSig(st);
+  if(v && (now-v.at < STALE_MIN*60000) && v.sig===sig){
+    const mins=Math.ceil((STALE_MIN*60000-(now-v.at))/60000);
+    toast(`Ты уже подтвердил эту АЗС. Снова можно через ~${mins} мин или когда данные изменятся`);
+    return;
+  }
+  st.updatedAt=now; st.confirms=(st.confirms||0)+1;
+  await DB.saveOne(st);
+  votes[st.id]={at:now,sig}; saveVotes(votes);
+  selectStation(selected); toast('Спасибо! Подтверждение учтено');
 }
 
 /* ---- форма отчёта ---- */
@@ -455,9 +490,8 @@ function openForm(){
         <select id="q"><option value="none"${draft.q==='none'?' selected':''}>Нет очереди</option>
         <option value="small"${draft.q==='small'?' selected':''}>5–10 машин</option>
         <option value="big"${draft.q==='big'?' selected':''}>Большая</option></select></div>
-      <div class="field two">
-        <div><label>Цена АИ-92</label><input id="p92" inputmode="decimal" placeholder="₽" value="${esc(draft.p['92']||'')}"></div>
-        <div><label>Цена АИ-95</label><input id="p95" inputmode="decimal" placeholder="₽" value="${esc(draft.p['95']||'')}"></div>
+      <div class="field"><label>Цены (по желанию)</label>
+        <div class="prices">${FUELS.map(f=>`<div class="pcell"><span>${f.label}</span><input id="p-${f.k}" inputmode="decimal" placeholder="₽" value="${esc((draft.p&&draft.p[f.k])||'')}"></div>`).join('')}</div>
       </div>
       <div class="field"><label>Комментарий / лимит</label>
         <textarea id="note" placeholder="напр. до 20 л, только по карте, в канистры нельзя">${esc(draft.note||'')}</textarea></div>
@@ -476,14 +510,34 @@ async function submitReport(){
   const st=stations.find(x=>x.id===selected);
   st.f={...draft.f};
   st.q=document.getElementById('q').value;
-  st.p={'92':document.getElementById('p92').value.trim(),'95':document.getElementById('p95').value.trim()};
+  st.p={}; FUELS.forEach(f=>{const el=document.getElementById('p-'+f.k); const val=el?el.value.trim():''; if(val) st.p[f.k]=val;});
   st.note=document.getElementById('note').value.trim();
   st.updatedAt=Date.now(); st.confirms=1;
   await DB.saveOne(st); selectStation(selected); toast('Опубликовано. Спасибо, разведчик!');
 }
-async function reportBad(){ const st=stations.find(x=>x.id===selected); if(!st) return;
-  st.flags=(st.flags||0)+1; await DB.saveOne(st); renderMarkers(); selectStation(selected);
-  toast('Жалоба учтена. Спасибо!'); }
+function reportBad(){
+  const st=stations.find(x=>x.id===selected); if(!st) return;
+  body.innerHTML=`
+    <div class="cardhead" style="margin-bottom:6px">
+      <div><h2>Жалоба</h2><div class="addr">${esc(st.brand)} · ${esc(st.name)}</div></div>
+      <button class="xbtn" onclick="selectStation(selected)" aria-label="Назад">✕</button>
+    </div>
+    <div class="form">
+      <div class="formnote">Опиши, что не так: неверная цена, топлива на деле нет / есть, фейковая отметка и т.п.</div>
+      <div class="field"><textarea id="rReason" placeholder="Например: цена завышена, АИ-95 на деле нет"></textarea></div>
+      <div class="actions">
+        <button class="btn primary" onclick="sendReport()">Отправить</button>
+        <button class="btn" onclick="selectStation(selected)">Отмена</button>
+      </div>
+    </div>`;
+}
+async function sendReport(){
+  const st=stations.find(x=>x.id===selected); if(!st) return;
+  const reason=(document.getElementById('rReason').value||'').trim();
+  st.flags=(st.flags||0)+1; await DB.saveOne(st);
+  await DB.addReport({station_id:st.id, station_name:`${st.brand} · ${st.name}`, reason});
+  renderMarkers(); selectStation(selected); toast('Жалоба отправлена. Спасибо!');
+}
 function routeTo(id){ const st=stations.find(x=>x.id===id); if(!st) return;
   // маршрут от текущего местоположения (~) до заправки в Яндекс.Картах
   window.open(`https://yandex.ru/maps/?rtext=~${st.lat}%2C${st.lng}&rtt=auto`,'_blank'); }
@@ -544,6 +598,9 @@ document.getElementById('locBtn').onclick=()=>{
     map.setView(ll,15);
   },()=>toast('Не удалось определить местоположение'),{enableHighAccuracy:true,timeout:8000});
 };
+document.getElementById('themeBtn').onclick=()=>{ applyTheme(mapTheme==='dark'?'light':'dark');
+  renderMarkers(); if(selected) selectStation(selected);
+  toast(mapTheme==='light'?'Светлая карта':'Тёмная карта'); };
 
 /* ---- сброс к демо (двойной тап по счётчику «без данных») ---- */
 cs.parentElement.ondblclick=async()=>{ if(confirm('Сбросить карту к демо-данным?')){
